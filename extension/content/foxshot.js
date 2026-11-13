@@ -10,7 +10,6 @@
  *   browser/components/screenshots/overlayHelpers.mjs               -> Region, WindowDimensions, element picking
  *   browser/components/screenshots/screenshots-buttons.js           -> the "Save visible / Save full page" panel
  *   browser/components/screenshots/screenshots-preview.mjs          -> the preview dialog
- *   browser/components/screenshots/fileHelpers.mjs                  -> getFilename
  *   browser/components/screenshots/ScreenshotsUtils.sys.mjs         -> Foxshot controller
  *
  * Firefox renders the page with drawSnapshot(); extensions can only grab the
@@ -1952,50 +1951,17 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* fileHelpers.mjs: getFilename                                       */
+  /* Filename: foxshot-2026-11-13-183449.png (local time)               */
   /* ------------------------------------------------------------------ */
 
-  const MAX_FILENAME_LENGTH = 255;
-
-  function byteLength(str) {
-    return new TextEncoder().encode(str).length;
-  }
-
-  function getFilename(filenameTitle) {
+  function getFilename() {
     const date = new Date();
-    /* eslint-disable no-control-regex */
-    filenameTitle = (filenameTitle || "")
-      .replace(/[\\/]/g, "_")
-      .replace(/[‎‏‪-‮]/g, "")
-      .replace(/[\x00-\x1f\x7f-\x9f:*?|"<>;,+=\[\]~]+/g, " ")
-      .replace(/^[\s᠎.]+|[\s᠎.]+$/g, "");
-    /* eslint-enable no-control-regex */
-    filenameTitle = filenameTitle.replace(/\s{1,4000}/g, " ");
-    const currentDateTime = new Date(
+    const local = new Date(
       date.getTime() - date.getTimezoneOffset() * 60 * 1000
     ).toISOString();
-    const filenameDate = currentDateTime.substring(0, 10);
-    const filenameTime = currentDateTime.substring(11, 19).replace(/:/g, "-");
-    let base = `Screenshot ${filenameDate} at ${filenameTime}`;
-    let clipFilename = base;
-    if (filenameTitle.length) {
-      clipFilename += " " + filenameTitle;
-    }
-
-    // allow space for a potential ellipsis and the extension
-    let maxNameStemLength = MAX_FILENAME_LENGTH - "[...].png".length;
-    let suffix = "";
-    for (let cropSize = maxNameStemLength; cropSize >= 0; cropSize -= 1) {
-      if (byteLength(clipFilename) > maxNameStemLength) {
-        clipFilename = clipFilename.substring(0, cropSize);
-        suffix = "[...]";
-      } else {
-        break;
-      }
-    }
-    clipFilename += suffix;
-
-    return { filename: clipFilename + ".png", fallbackFilename: base + ".png" };
+    const day = local.substring(0, 10);
+    const time = local.substring(11, 19).replace(/:/g, "");
+    return `foxshot-${day}-${time}.png`;
   }
 
   /* ------------------------------------------------------------------ */
@@ -2572,23 +2538,34 @@
         });
     }
 
-    async downloadRegion(region) {
+    /**
+     * Download a region, and copy it to the clipboard too. Like copyRegion,
+     * must be called synchronously from a user gesture.
+     */
+    downloadRegion(region) {
       if (this.busy) {
         return;
       }
       this.busy = true;
       this.setHostVisible(false);
-      try {
-        let { blob, cropped } = await captureRegion(region);
-        await this.saveBlob(blob);
-        this.savedMethod("download");
-        if (cropped) {
-          showHint(L10N.tooLargeTitle, false);
-        }
-      } catch (e) {
-        console.error("Foxshot: download failed", e);
-      }
-      this.exit();
+      let capture = captureRegion(region);
+      let copied = this.writeClipboard(capture.then(c => c.blob));
+      capture
+        .then(async ({ blob, cropped }) => {
+          await this.saveBlob(blob);
+          this.savedMethod("download");
+          let ok = await copied;
+          this.exit();
+          if (cropped) {
+            showHint(L10N.tooLargeTitle, false);
+          } else if (ok) {
+            showHint(L10N.copied, true);
+          }
+        })
+        .catch(e => {
+          console.error("Foxshot: download failed", e);
+          this.exit();
+        });
     }
 
     writeClipboard(blobPromise) {
@@ -2609,7 +2586,8 @@
     }
 
     async saveBlob(blob) {
-      let { filename, fallbackFilename } = getFilename(document.title);
+      let filename = getFilename();
+      let fallbackFilename = filename;
       let url = await new Promise((resolve, reject) => {
         let reader = new FileReader();
         reader.onload = () => resolve(reader.result);
@@ -2781,10 +2759,21 @@
         case "preview-download": {
           this.disableDialogButtons();
           this.busy = true;
-          this.saveBlob(this.previewBlob)
-            .then(() => this.savedMethod("download"))
-            .catch(e => console.error("Foxshot: download failed", e))
-            .finally(() => this.exit());
+          let blob = this.previewBlob;
+          let copied = this.writeClipboard(Promise.resolve(blob));
+          this.saveBlob(blob)
+            .then(async () => {
+              this.savedMethod("download");
+              let ok = await copied;
+              this.exit();
+              if (ok) {
+                showHint(L10N.copied, true);
+              }
+            })
+            .catch(e => {
+              console.error("Foxshot: download failed", e);
+              this.exit();
+            });
           break;
         }
       }

@@ -10,7 +10,7 @@
 
 - Drag to select a region, or click to pick an element
 - **Save visible** and **Save full page**, with a preview before saving
-- Copy to clipboard or download as PNG
+- Every screenshot is copied to the clipboard, and can be downloaded as PNG
 - Keyboard: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to start, <kbd>Esc</kbd> to cancel, <kbd>Ctrl</kbd>+<kbd>C</kbd> copy, <kbd>Ctrl</kbd>+<kbd>S</kbd> download, arrow keys to adjust
 
 No telemetry, no accounts, no network access.
