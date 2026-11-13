@@ -10,6 +10,7 @@
  *   browser/components/screenshots/overlayHelpers.mjs               -> Region, WindowDimensions, element picking
  *   browser/components/screenshots/screenshots-buttons.js           -> the "Save visible / Save full page" panel
  *   browser/components/screenshots/screenshots-preview.mjs          -> the preview dialog
+ *   browser/components/screenshots/fileHelpers.mjs                  -> getFilename
  *   browser/components/screenshots/ScreenshotsUtils.sys.mjs         -> Foxshot controller
  *
  * Firefox renders the page with drawSnapshot(); extensions can only grab the
@@ -1951,17 +1952,51 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Filename: foxshot-2026-11-13-183449.png (local time)               */
+  /* fileHelpers.mjs: getFilename                                       */
+  /* "Fireshot 2026-11-13 at 18-34-49 Page Title.png"                   */
   /* ------------------------------------------------------------------ */
 
-  function getFilename() {
+  const MAX_FILENAME_LENGTH = 255;
+
+  function byteLength(str) {
+    return new TextEncoder().encode(str).length;
+  }
+
+  function getFilename(filenameTitle) {
     const date = new Date();
-    const local = new Date(
+    /* eslint-disable no-control-regex */
+    filenameTitle = (filenameTitle || "")
+      .replace(/[\\/]/g, "_")
+      .replace(/[‎‏‪-‮]/g, "")
+      .replace(/[\x00-\x1f\x7f-\x9f:*?|"<>;,+=\[\]~]+/g, " ")
+      .replace(/^[\s᠎.]+|[\s᠎.]+$/g, "");
+    /* eslint-enable no-control-regex */
+    filenameTitle = filenameTitle.replace(/\s{1,4000}/g, " ");
+    const currentDateTime = new Date(
       date.getTime() - date.getTimezoneOffset() * 60 * 1000
     ).toISOString();
-    const day = local.substring(0, 10);
-    const time = local.substring(11, 19).replace(/:/g, "");
-    return `foxshot-${day}-${time}.png`;
+    const filenameDate = currentDateTime.substring(0, 10);
+    const filenameTime = currentDateTime.substring(11, 19).replace(/:/g, "-");
+    let base = `Fireshot ${filenameDate} at ${filenameTime}`;
+    let clipFilename = base;
+    if (filenameTitle.length) {
+      clipFilename += " " + filenameTitle;
+    }
+
+    // allow space for a potential ellipsis and the extension
+    let maxNameStemLength = MAX_FILENAME_LENGTH - "[...].png".length;
+    let suffix = "";
+    for (let cropSize = maxNameStemLength; cropSize >= 0; cropSize -= 1) {
+      if (byteLength(clipFilename) > maxNameStemLength) {
+        clipFilename = clipFilename.substring(0, cropSize);
+        suffix = "[...]";
+      } else {
+        break;
+      }
+    }
+    clipFilename += suffix;
+
+    return { filename: clipFilename + ".png", fallbackFilename: base + ".png" };
   }
 
   /* ------------------------------------------------------------------ */
@@ -2586,8 +2621,7 @@
     }
 
     async saveBlob(blob) {
-      let filename = getFilename();
-      let fallbackFilename = filename;
+      let { filename, fallbackFilename } = getFilename(document.title);
       let url = await new Promise((resolve, reject) => {
         let reader = new FileReader();
         reader.onload = () => resolve(reader.result);
